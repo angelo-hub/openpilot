@@ -30,6 +30,7 @@ jobs:
     timeout-minutes: 180
     env:
       GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}  # gh would otherwise target the parent repo (commaai)
       FORCE: ${{ inputs.force || false }}
       CI: 1
       PYTHONPATH: ${{ github.workspace }}

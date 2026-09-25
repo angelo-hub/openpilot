@@ -16,6 +16,13 @@ source "$WORK/vars"
 
 STATE_LABEL=fork-sync
 
+# In a fork, gh defaults to the *parent* repo (commaai/...). Every gh call here must target the fork.
+if [ -z "${GH_REPO:-}" ]; then
+  GH_REPO=$(git remote get-url origin | sed -E 's#^(git@github.com:|https://github.com/)##; s#\.git$##')
+fi
+export GH_REPO
+case "$GH_REPO" in commaai/*) echo "refusing to run against $GH_REPO" >&2; exit 1 ;; esac
+
 log() { echo "[fork-sync] $*" >&2; }
 
 # Persist a variable for later steps (and expose it as a step output).
@@ -28,7 +35,7 @@ setvar() {
   fi
 }
 
-repo_slug() { gh repo view --json nameWithOwner --jq .nameWithOwner; }
+repo_slug() { echo "$GH_REPO"; }
 
 # --- state: a single status issue whose body carries the last run's JSON ---
 
