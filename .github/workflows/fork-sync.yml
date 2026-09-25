@@ -1,0 +1,99 @@
+name: fork sync
+
+# Weekly upstream merge of commaai/openpilot into `integration`, gated on tests passing (not on the absence of conflicts).
+# The repair agent runs only when the merge conflicts in an allowed path. Nothing here writes `port`
+# or `device`; see .github/fork-sync/README.md.
+
+on:
+  schedule:
+    - cron: '0 11 * * 1'  # Mondays 11:00 UTC, after the opendbc fork's run
+  workflow_dispatch:
+    inputs:
+      force:
+        description: Run even if upstream has not moved since the last run
+        type: boolean
+        default: false
+
+concurrency:
+  group: fork-sync
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+  pull-requests: write
+  issues: write
+
+jobs:
+  sync:
+    if: github.repository == 'angelo-hub/openpilot'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 180
+    env:
+      GH_TOKEN: ${{ github.token }}
+      FORCE: ${{ inputs.force || false }}
+      CI: 1
+      PYTHONPATH: ${{ github.workspace }}
+      # same LFS exclusion as upstream's tests.yaml
+      GIT_CONFIG_COUNT: 1
+      GIT_CONFIG_KEY_0: lfs.fetchexclude
+      GIT_CONFIG_VALUE_0: openpilot/selfdrive/modeld/models/big_driving_tinygrad.pkl
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: port
+          fetch-depth: 0
+          filter: blob:none
+
+      - name: git identity
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+      - id: detect
+        name: 1. fetch upstream
+        run: .github/fork-sync/detect.sh
+
+      - id: merge
+        name: 2-4. merge upstream and triage conflicts
+        if: steps.detect.outputs.DECISION == 'run'
+        run: .github/fork-sync/merge.sh
+
+      - id: prompt
+        if: steps.merge.outputs.RESULT == 'conflict'
+        run: .github/fork-sync/render_prompt.sh
+
+      - id: agent
+        name: repair agent
+        if: steps.merge.outputs.RESULT == 'conflict'
+        continue-on-error: true
+        uses: anthropics/claude-code-action@v1
+        with:
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          github_token: ${{ github.token }}
+          prompt: ${{ steps.prompt.outputs.PROMPT }}
+          claude_args: >-
+            --model claude-opus-5-5
+            --max-turns 60
+            --allowedTools "Read,Edit,Write,Glob,Grep,Bash(git diff:*),Bash(git log:*),Bash(git show:*),Bash(git status:*),Bash(git ls-files:*),Bash(git merge-base:*),Bash(git blame:*),Bash(.github/fork-sync/agent_test.sh:*)"
+            --disallowedTools "Bash(git push:*),Bash(git commit:*),Bash(git checkout:*),Bash(git reset:*),Bash(git restore:*),Bash(git merge:*),Bash(git add:*),Bash(git rebase:*),WebFetch,WebSearch"
+
+      - id: verify
+        name: check the agent's resolution
+        if: steps.merge.outputs.RESULT == 'conflict' && steps.agent.outcome == 'success'
+        run: .github/fork-sync/verify.sh
+
+      - id: resume
+        name: merge remaining upstream branches
+        if: steps.verify.outputs.VERIFY == 'ok'
+        run: .github/fork-sync/merge.sh continue
+
+      - id: gate
+        name: gate (opendbc pin, build, unit tests)
+        if: steps.merge.outputs.RESULT == 'clean' || steps.resume.outputs.RESULT == 'clean'
+        run: .github/fork-sync/gate.sh
+
+      - name: publish
+        if: always() && steps.detect.outputs.DECISION == 'run'
+        env:
+          AGENT_OUTCOME: ${{ steps.agent.outcome }}
+        run: .github/fork-sync/publish.sh
