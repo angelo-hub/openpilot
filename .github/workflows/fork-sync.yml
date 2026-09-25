@@ -89,11 +89,13 @@ jobs:
 
       - id: gate
         name: gate (opendbc pin, build, unit tests)
+        continue-on-error: true  # a crashed gate is reported as red by publish
         if: steps.merge.outputs.RESULT == 'clean' || steps.resume.outputs.RESULT == 'clean'
         run: .github/fork-sync/gate.sh
 
       - name: publish
         if: always() && steps.detect.outputs.DECISION == 'run'
+        continue-on-error: true  # keep scheduled runs green; the status issue is the notification channel
         env:
           AGENT_OUTCOME: ${{ steps.agent.outcome }}
         run: .github/fork-sync/publish.sh
