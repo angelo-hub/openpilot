@@ -96,6 +96,8 @@ commit_step() {
 # --- state: a status issue per line whose body carries the last run's JSON ---
 
 state_issue() {
+  # Cached for the run: issue search lags creation, so a second lookup could create a duplicate.
+  if [ -n "${STATE_ISSUE:-}" ]; then echo "$STATE_ISSUE"; return; fi
   local n
   n=$(gh issue list --label "$STATE_LABEL" --state all --limit 1 --json number --jq '.[0].number // empty' 2>/dev/null || true)
   if [ -z "$n" ]; then
@@ -103,6 +105,8 @@ state_issue() {
     n=$(gh issue create --title "$STATE_TITLE" --label "$STATE_LABEL" \
           --body "$(state_body '{}' 'No runs yet.')" | grep -oE '[0-9]+$')
   fi
+  printf 'STATE_ISSUE=%q\n' "$n" >> "$WORK/vars"
+  STATE_ISSUE=$n
   echo "$n"
 }
 
