@@ -1,11 +1,12 @@
 # fork-sync settings for angelo-hub/openpilot (device-side changes; opendbc comes from angelo-hub/opendbc).
 # Sourced by lib.sh.
 
-UPSTREAM_URL=https://github.com/commaai/openpilot.git
-UPSTREAM_BRANCHES="master"
+UPSTREAM_REMOTES="upstream=https://github.com/commaai/openpilot.git"
+UPSTREAM_SPECS="upstream/master"
 PORT_BRANCH=port
 INTEGRATION_BRANCH=integration
 FAILED_BRANCH=sync/failed
+DEVICE_BRANCH=device
 
 # .gitmodules and the opendbc_repo pointer are handled by repo_fixups below before triage; a conflict left
 # in them, or in the openpilot side of lateral control, stops the run.
@@ -14,14 +15,15 @@ STOP_PATHS='^(\.gitmodules|opendbc_repo|panda|selfdrive/controls/|selfdrive/self
 PROMPT_NOTES="This fork carries device-side changes only (systemd units, offroad power management, networking
 persistence). The opendbc_repo submodule and .gitmodules are managed by the workflow; never touch them."
 
-# The opendbc submodule tracks the opendbc fork's device branch: only opendbc code already promoted to
-# the car is ever pinned here. Merging upstream openpilot would otherwise silently flip the pointer back
+# The opendbc submodule tracks the opendbc fork's device branch (OPENDBC_DEVICE_BRANCH): only opendbc code
+# already promoted to the car is ever pinned here. Merging upstream openpilot would otherwise silently flip the pointer back
 # to comma's opendbc.
 OPENDBC_FORK=https://github.com/angelo-hub/opendbc.git
+OPENDBC_DEVICE_BRANCH=device
 OPENDBC_UPSTREAM=https://github.com/commaai/opendbc.git
 OPENDBC_URL_IN_GITMODULES=../../angelo-hub/opendbc.git
 
-opendbc_device() { git ls-remote "$OPENDBC_FORK" refs/heads/device | cut -f1; }
+opendbc_device() { git ls-remote "$OPENDBC_FORK" "refs/heads/$OPENDBC_DEVICE_BRANCH" | cut -f1; }
 
 extra_fingerprint() { echo "opendbc-device@$(opendbc_device | cut -c1-12)"; }
 
@@ -38,7 +40,7 @@ repo_fixups() {
   local d up
   d=$(opendbc_device)
   if [ -z "$d" ]; then
-    echo "angelo-hub/opendbc has no \`device\` branch yet; create it before openpilot can be synced." > "$WORK/repo-block.md"
+    echo "angelo-hub/opendbc has no \`$OPENDBC_DEVICE_BRANCH\` branch yet; create it before this fork can be synced." > "$WORK/repo-block.md"
     return 1
   fi
 
@@ -54,11 +56,11 @@ repo_fixups() {
   if [ -n "$up" ]; then
     local odb="$WORK/opendbc.git"
     [ -d "$odb" ] || git init -q --bare "$odb"
-    git -C "$odb" fetch -q --filter=blob:none "$OPENDBC_FORK" "+refs/heads/device:refs/heads/device"
+    git -C "$odb" fetch -q --filter=blob:none "$OPENDBC_FORK" "+refs/heads/$OPENDBC_DEVICE_BRANCH:refs/heads/device"
     git -C "$odb" fetch -q --filter=blob:none "$OPENDBC_UPSTREAM" "$up" 2>/dev/null || true
     if ! git -C "$odb" merge-base --is-ancestor "$up" "$d" 2>/dev/null; then
-      printf 'upstream openpilot pins opendbc `%s`, which angelo-hub/opendbc `device` (`%s`) does not contain yet. Merge and promote the opendbc sync first; openpilot will follow on its next run.\n' \
-        "${up:0:12}" "${d:0:12}" > "$WORK/repo-block.md"
+      printf 'upstream openpilot pins opendbc `%s`, which angelo-hub/opendbc `%s` (`%s`) does not contain yet. Merge and promote the opendbc sync first; openpilot will follow on its next run.\n' \
+        "${up:0:12}" "$OPENDBC_DEVICE_BRANCH" "${d:0:12}" > "$WORK/repo-block.md"
       return 1
     fi
   fi

@@ -14,9 +14,14 @@ else
   fail "agent did not write RESOLUTION.md explaining the resolution"
 fi
 
-# The agent must not commit, reset, or abort: HEAD and the in-progress merge must be untouched.
+# The agent must not commit, reset, or abort: HEAD and the in-progress step must be untouched.
 [ "$(git rev-parse HEAD)" = "$(cat "$WORK/pre-head")" ] || fail "HEAD moved during repair (agent committed or reset)"
-git rev-parse -q --verify MERGE_HEAD >/dev/null || fail "merge is no longer in progress (agent aborted or committed it)"
+kind=$(cat "$WORK/in-progress" 2>/dev/null || true)
+if [ "$kind" = merge ]; then
+  git rev-parse -q --verify MERGE_HEAD >/dev/null || fail "merge is no longer in progress (agent aborted or committed it)"
+elif [ "$kind" != delta ]; then
+  fail "no merge or delta apply in progress"
+fi
 
 cut -f1 "$WORK/sides" > "$WORK/conflicted"
 while IFS= read -r f; do git add -A -- "$f"; done < "$WORK/conflicted"
@@ -55,5 +60,5 @@ if [ -s "$report" ]; then
   exit 0
 fi
 
-git commit -q --no-edit
+commit_step
 setvar VERIFY ok

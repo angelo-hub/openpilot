@@ -36,8 +36,8 @@ headline=""
 case "$outcome" in
   green)
     git push -q --force origin "HEAD:refs/heads/$INTEGRATION_BRANCH"
-    body=$(printf 'Automated upstream merge into `%s`. Gate is green%s.\n\nReview before merging: merging this PR does **not** touch the car; promotion to `device` stays manual.\n\n%s\n' \
-      "$PORT_BRANCH" "$($agent_ran && echo ', after a repair-agent conflict resolution' || true)" "$details")
+    body=$(printf 'Automated upstream merge into `%s`. Gate is green%s.\n\nReview before merging: merging this PR does **not** touch the car; promotion to `%s` stays manual.\n\n%s\n' \
+      "$PORT_BRANCH" "$($agent_ran && echo ', after a repair-agent conflict resolution' || true)" "${DEVICE_BRANCH:-device}" "$details")
     pr=$(gh pr list --head "$INTEGRATION_BRANCH" --base "$PORT_BRANCH" --state open --json number --jq '.[0].number // empty')
     if [ -n "$pr" ]; then
       gh pr edit "$pr" --title "$title" --body "$body" >/dev/null

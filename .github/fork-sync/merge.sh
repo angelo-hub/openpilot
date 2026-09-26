@@ -1,15 +1,15 @@
 #!/usr/bin/env bash
-# Steps 2-4: reset integration to port, merge each pending upstream branch, triage conflicts.
+# Steps 2-4: reset integration to port, merge (or delta-apply) each pending upstream spec, triage conflicts.
 #
-#   merge.sh            start from port and merge everything in $PENDING
-#   merge.sh continue   after a repaired conflict, merge whatever was left in $REMAINING
+#   merge.sh            start from port and apply everything in $PENDING
+#   merge.sh continue   after a repaired conflict, apply whatever was left in $REMAINING
 #
 # Sets RESULT to one of:
-#   clean               every merge applied (possibly after repair); go run the gate
-#   conflict            stopped mid-merge in allowed paths only; the repair agent may run
-#   blocked-safety      a conflict touches $STOP_PATHS; merge aborted, human review
-#   blocked-structural  delete/rename-style conflict an agent cannot combine; merge aborted
-#   blocked-repo        a repo-specific rule refused the merge (see config.sh); merge aborted
+#   clean               every step applied (possibly after repair); go run the gate
+#   conflict            stopped mid-step in allowed paths only; the repair agent may run
+#   blocked-safety      a conflict touches $STOP_PATHS; step aborted, human review
+#   blocked-structural  delete/rename-style conflict an agent cannot combine; step aborted
+#   blocked-repo        a repo-specific rule refused the step (see config.sh), or git refused it; aborted
 source "$(dirname "$0")/lib.sh"
 
 mode=${1:-start}
@@ -32,41 +32,42 @@ if [ "$mode" = start ] && [ ${#todo[@]} -eq 0 ]; then
 fi
 
 while [ ${#todo[@]} -gt 0 ]; do
-  b=${todo[0]}
+  spec=${todo[0]}
   todo=("${todo[@]:1}")
-  msg="Merge upstream $b ($(git rev-parse --short=12 "upstream/$b")) into $INTEGRATION_BRANCH"
 
-  if git merge --no-ff --no-edit -m "$msg" "upstream/$b" > "$WORK/merge-$b.log" 2>&1; then
-    # A clean merge can still silently flip things the fork owns (e.g. a submodule pointer).
-    if ! repo_fixups; then git reset -q --hard HEAD~1; setvar RESULT blocked-repo; exit 0; fi
-    git diff --cached --quiet || git commit -q --amend --no-edit
-    merged+=("$b")
-    continue
+  if ! start_step "$spec"; then
+    { echo "git could not start \`$spec\`:"; echo '```'; tail -n 20 "$WORK/step.log"; echo '```'; } > "$WORK/repo-block.md"
+    abort_step
+    setvar RESULT blocked-repo
+    exit 0
   fi
+  # Runs on clean steps too: a clean merge can still silently flip things the fork owns (a submodule pointer).
+  if ! repo_fixups; then abort_step; setvar RESULT blocked-repo; exit 0; fi
 
-  if ! repo_fixups; then git merge --abort; setvar RESULT blocked-repo; exit 0; fi
   conflicts=$(git diff --name-only --diff-filter=U)
   if [ -z "$conflicts" ]; then
-    git commit -q --no-edit
-    merged+=("$b")
+    commit_step
+    merged+=("$spec")
     continue
   fi
 
   if [ "$mode" = continue ]; then
-    # One repair per night. Leave the rest for tomorrow rather than stacking agent runs.
-    git merge --abort
-    deferred=("$b" "${todo[@]}")
+    # One repair per run. Leave the rest for next time rather than stacking agent runs.
+    abort_step
+    deferred=("$spec" ${todo[@]+"${todo[@]}"})
     break
   fi
 
   setvar CONFLICTS "$conflicts"
-  setvar CONFLICT_BRANCH "$b"
+  setvar CONFLICT_BRANCH "$spec"
+  setvar CONFLICT_THEIRS "$(sed -n 1p "$WORK/step-sides")"
+  setvar CONFLICT_BASE "$(sed -n 2p "$WORK/step-sides")"
   setvar MERGED "${merged[*]:-}"
   setvar REMAINING "${todo[*]:-}"
 
   stop=$(echo "$conflicts" | grep -E "$STOP_PATHS" || true)
   if [ -n "$stop" ]; then
-    git merge --abort
+    abort_step
     setvar STOPPED "$stop"
     setvar RESULT blocked-safety
     exit 0
@@ -75,7 +76,7 @@ while [ ${#todo[@]} -gt 0 ]; do
   # Only both-modified (UU) and both-added (AA) conflicts have two sides to combine.
   structural=$(git status --porcelain=v1 | grep -E '^(DD|AU|UD|UA|DU) ' | cut -c4- || true)
   if [ -n "$structural" ]; then
-    git merge --abort
+    abort_step
     setvar STOPPED "$structural"
     setvar RESULT blocked-structural
     exit 0
