@@ -99,7 +99,7 @@ state_issue() {
   # Cached for the run: issue search lags creation, so a second lookup could create a duplicate.
   if [ -n "${STATE_ISSUE:-}" ]; then echo "$STATE_ISSUE"; return; fi
   local n
-  n=$(gh issue list --label "$STATE_LABEL" --state all --limit 1 --json number --jq '.[0].number // empty' 2>/dev/null || true)
+  n=$(gh issue list --label "$STATE_LABEL" --state open --limit 1 --json number --jq '.[0].number // empty' 2>/dev/null || true)
   if [ -z "$n" ]; then
     gh label create "$STATE_LABEL" --color 5319e7 --description "Weekly upstream sync status" >/dev/null || true
     n=$(gh issue create --title "$STATE_TITLE" --label "$STATE_LABEL" \
